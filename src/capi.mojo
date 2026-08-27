@@ -1,9 +1,13 @@
 """Hot kernels for mojo-scanpy over contiguous float64 buffers."""
 
 from std.math import sqrt
-from std.sys.info import simd_width_of
+from max.algorithm import parallelize
+from std.sys.info import simd_width_of as simdwidthof
 
 comptime Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
+comptime IndexPtr = UnsafePointer[Int64, AnyOrigin[mut=True]]
+comptime PARALLEL_WORK_THRESHOLD = 1_000_000
+comptime MAX_WORKERS = 16
 
 
 def p(addr: Int) -> Ptr:
@@ -11,41 +15,81 @@ def p(addr: Int) -> Ptr:
 
 
 def distance2(a: Ptr, b: Ptr, d: Int) -> Float64:
-    var total = 0.0
-    comptime W = simd_width_of[DType.float64]()
+    comptime W = simdwidthof[DType.float64]()
+    var acc0 = SIMD[DType.float64, W](0.0)
+    var acc1 = SIMD[DType.float64, W](0.0)
+    var acc2 = SIMD[DType.float64, W](0.0)
+    var acc3 = SIMD[DType.float64, W](0.0)
     var j = 0
-    var vector_end = d - d % W
-    for j in range(0, vector_end, W):
+    while j + 4 * W <= d:
+        var delta0 = a.load[width=W](j) - b.load[width=W](j)
+        var delta1 = a.load[width=W](j + W) - b.load[width=W](j + W)
+        var delta2 = a.load[width=W](j + 2 * W) - b.load[width=W](j + 2 * W)
+        var delta3 = a.load[width=W](j + 3 * W) - b.load[width=W](j + 3 * W)
+        acc0 += delta0 * delta0
+        acc1 += delta1 * delta1
+        acc2 += delta2 * delta2
+        acc3 += delta3 * delta3
+        j += 4 * W
+    while j + W <= d:
         var delta = a.load[width=W](j) - b.load[width=W](j)
-        total += (delta * delta).reduce_add()
-    for j in range(vector_end, d):
+        acc0 += delta * delta
+        j += W
+    var total = (acc0 + acc1 + acc2 + acc3).reduce_add()
+    while j < d:
         var delta = a[j] - b[j]
         total += delta * delta
+        j += 1
     return total
 
 
+def knn_row(
+    train: Ptr, query: Ptr, indices: IndexPtr, distances: Ptr,
+    n: Int, d: Int, k: Int, exclude_self: Int, row: Int,
+):
+    var base = row * k
+    for slot in range(k):
+        distances[base + slot] = 1.7976931348623157e308
+        indices[base + slot] = -1
+    for candidate in range(n):
+        if exclude_self != 0 and candidate == row:
+            continue
+        var value = distance2(query + row * d, train + candidate * d, d)
+        if value >= distances[base + k - 1]:
+            continue
+        var slot = k - 1
+        while slot > 0 and distances[base + slot - 1] > value:
+            distances[base + slot] = distances[base + slot - 1]
+            indices[base + slot] = indices[base + slot - 1]
+            slot -= 1
+        distances[base + slot] = value
+        indices[base + slot] = Int64(candidate)
+
+
 def knn(
-    train: Ptr, query: Ptr, indices: Ptr, distances: Ptr,
+    train: Ptr, query: Ptr, indices: IndexPtr, distances: Ptr,
     n: Int, d: Int, m: Int, k: Int, exclude_self: Int,
 ):
-    for row in range(m):
-        var base = row * k
-        for slot in range(k):
-            distances[base + slot] = 1.7976931348623157e308
-            indices[base + slot] = -1.0
-        for candidate in range(n):
-            if exclude_self != 0 and candidate == row:
-                continue
-            var value = distance2(query + row * d, train + candidate * d, d)
-            if value >= distances[base + k - 1]:
-                continue
-            var slot = k - 1
-            while slot > 0 and distances[base + slot - 1] > value:
-                distances[base + slot] = distances[base + slot - 1]
-                indices[base + slot] = indices[base + slot - 1]
-                slot -= 1
-            distances[base + slot] = value
-            indices[base + slot] = Float64(candidate)
+    if m > 1 and n * d * m >= PARALLEL_WORK_THRESHOLD:
+        var train_address = Int(train)
+        var query_address = Int(query)
+        var indices_address = Int(indices)
+        var distances_address = Int(distances)
+
+        @parameter
+        def work(row: Int):
+            knn_row(
+                Ptr(unsafe_from_address=train_address),
+                Ptr(unsafe_from_address=query_address),
+                IndexPtr(unsafe_from_address=indices_address),
+                Ptr(unsafe_from_address=distances_address),
+                n, d, k, exclude_self, row,
+            )
+
+        parallelize[work](m, min(m, MAX_WORKERS))
+    else:
+        for row in range(m):
+            knn_row(train, query, indices, distances, n, d, k, exclude_self, row)
 
 
 def covariance(x: Ptr, mean: Ptr, matrix: Ptr, n: Int, d: Int):
@@ -120,7 +164,10 @@ def msp_knn(
         return -1
     if exclude_self != 0 and k >= n:
         return -1
-    knn(p(train), p(query), p(indices), p(distances), n, d, m, k, exclude_self)
+    knn(
+        p(train), p(query), IndexPtr(unsafe_from_address=indices), p(distances),
+        n, d, m, k, exclude_self,
+    )
     return 0
 
 

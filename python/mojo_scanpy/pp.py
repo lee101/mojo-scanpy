@@ -44,18 +44,17 @@ def neighbors(
     if requested < 2:
         raise ValueError("n_neighbors must be at least 2 (including self)")
     count = min(requested - 1, n_obs - 1)
-    indices = np.empty((n_obs, count), dtype=np.float64)
+    indices = np.empty((n_obs, count), dtype=np.int64)
     squared = np.empty((n_obs, count), dtype=np.float64)
     check_status(
         lib().msp_knn(addr(values), addr(values), addr(indices), addr(squared), n_obs, n_vars, n_obs, count, 1),
         "k-nearest-neighbor call",
     )
-    indices_i = indices.astype(np.int64)
     distances = np.sqrt(squared)
     rows = np.repeat(np.arange(n_obs), count)
-    cols = indices_i.ravel()
+    cols = indices.ravel()
     distance_graph = sparse.csr_matrix((distances.ravel(), (rows, cols)), shape=(n_obs, n_obs))
-    full_indices = np.column_stack((np.arange(n_obs), indices_i))
+    full_indices = np.column_stack((np.arange(n_obs), indices))
     full_distances = np.column_stack((np.zeros(n_obs), distances))
     if method == "umap":
         from scanpy.neighbors._connectivity import umap

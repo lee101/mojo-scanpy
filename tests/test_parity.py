@@ -50,14 +50,27 @@ def test_neighbors_match_scanpy_exact_neighbor_distances():
 
 def test_knn_simd_tail_matches_scalar_reference():
     values = np.ascontiguousarray(np.random.default_rng(21).normal(size=(19, 33)))
-    indices = np.empty((19, 4), dtype=np.float64)
+    indices = np.empty((19, 4), dtype=np.int64)
     squared = np.empty((19, 4), dtype=np.float64)
     lib().msp_knn(addr(values), addr(values), addr(indices), addr(squared), 19, 33, 19, 4, 1)
     reference = ((values[:, None] - values[None, :]) ** 2).sum(axis=2)
     np.fill_diagonal(reference, np.inf)
     expected_indices = np.argsort(reference, axis=1)[:, :4]
     expected_squared = np.take_along_axis(reference, expected_indices, axis=1)
-    assert np.array_equal(indices.astype(np.int64), expected_indices)
+    assert np.array_equal(indices, expected_indices)
+    assert np.allclose(squared, expected_squared, rtol=1e-12, atol=1e-12)
+
+
+def test_knn_parallel_threshold_with_simd_tail_matches_scalar_reference():
+    values = np.ascontiguousarray(np.random.default_rng(22).normal(size=(180, 33)))
+    indices = np.empty((180, 5), dtype=np.int64)
+    squared = np.empty((180, 5), dtype=np.float64)
+    lib().msp_knn(addr(values), addr(values), addr(indices), addr(squared), 180, 33, 180, 5, 1)
+    reference = ((values[:, None] - values[None, :]) ** 2).sum(axis=2)
+    np.fill_diagonal(reference, np.inf)
+    expected_indices = np.argsort(reference, axis=1)[:, :5]
+    expected_squared = np.take_along_axis(reference, expected_indices, axis=1)
+    assert np.array_equal(indices, expected_indices)
     assert np.allclose(squared, expected_squared, rtol=1e-12, atol=1e-12)
 
 

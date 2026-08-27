@@ -59,10 +59,14 @@ measured after the test suite in this checkout.
 
 | case | mojo-scanpy | scanpy | scanpy/mojo | result |
 |---|---:|---:|---:|---|
-| PCA (1,800 x 28, 15 PCs) | 3.7 ms | 4.7 ms | 1.28x | faster |
-| Exact neighbors (1,800 x 28, k=15) | 58.6 ms | 146.7 ms | 2.50x | faster |
+| PCA (1,800 x 28, 15 PCs) | 3.9 ms | 5.5 ms | 1.39x | faster |
+| Exact neighbors (1,800 x 28, k=15) | 30.5 ms | 47.9 ms | 1.57x | faster |
 
 Measured on `x86_64`, Python 3.13.14. The benchmark script prints the processor
-and Python version with every run. Neighbour search uses SIMD distance reductions.
+and Python version with every run. Neighbour search uses four-way unrolled SIMD
+distance reductions and parallel query rows above a work threshold; native
+`int64` index output also avoids a Python-side conversion copy.
 
-No GPU path is included. This project targets dense CPU kernels.
+No GPU path is included. Exact Euclidean distance has under 0.2 flop/byte for
+float64 input reads, far below the roughly 2 flop/byte threshold where transfer
+and launch costs could be justified, while the PCA case is already ahead on CPU.

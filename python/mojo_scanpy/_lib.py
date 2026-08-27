@@ -43,8 +43,8 @@ def f64(value, *, name: str = "input") -> np.ndarray:
 
 
 def addr(value: np.ndarray) -> int:
-    if value.dtype != np.float64 or not value.flags.c_contiguous:
-        raise TypeError("native buffers must be C-contiguous float64 arrays")
+    if value.dtype not in (np.dtype(np.float64), np.dtype(np.int64)) or not value.flags.c_contiguous:
+        raise TypeError("native buffers must be C-contiguous float64 or int64 arrays")
     if value.size == 0:
         raise ValueError("native buffers must not be empty")
     return int(value.ctypes.data)
