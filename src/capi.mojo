@@ -1,13 +1,10 @@
 """Hot kernels for mojo-scanpy over contiguous float64 buffers."""
 
 from std.math import sqrt
-from max.algorithm import parallelize
 from std.sys.info import simd_width_of as simdwidthof
 
 comptime Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
 comptime IndexPtr = UnsafePointer[Int64, AnyOrigin[mut=True]]
-comptime PARALLEL_WORK_THRESHOLD = 1_000_000
-comptime MAX_WORKERS = 16
 
 
 def p(addr: Int) -> Ptr:
@@ -70,26 +67,8 @@ def knn(
     train: Ptr, query: Ptr, indices: IndexPtr, distances: Ptr,
     n: Int, d: Int, m: Int, k: Int, exclude_self: Int,
 ):
-    if m > 1 and n * d * m >= PARALLEL_WORK_THRESHOLD:
-        var train_address = Int(train)
-        var query_address = Int(query)
-        var indices_address = Int(indices)
-        var distances_address = Int(distances)
-
-        @parameter
-        def work(row: Int):
-            knn_row(
-                Ptr(unsafe_from_address=train_address),
-                Ptr(unsafe_from_address=query_address),
-                IndexPtr(unsafe_from_address=indices_address),
-                Ptr(unsafe_from_address=distances_address),
-                n, d, k, exclude_self, row,
-            )
-
-        parallelize[work](m, min(m, MAX_WORKERS))
-    else:
-        for row in range(m):
-            knn_row(train, query, indices, distances, n, d, k, exclude_self, row)
+    for row in range(m):
+        knn_row(train, query, indices, distances, n, d, k, exclude_self, row)
 
 
 def covariance(x: Ptr, mean: Ptr, matrix: Ptr, n: Int, d: Int):

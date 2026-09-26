@@ -64,7 +64,7 @@ measured after the test suite in this checkout.
 
 Measured on `x86_64`, Python 3.13.14. The benchmark script prints the processor
 and Python version with every run. Neighbour search uses four-way unrolled SIMD
-distance reductions and parallel query rows above a work threshold; native
+distance reductions and a serial loop over query rows; native
 `int64` index output also avoids a Python-side conversion copy.
 
 No GPU path is included. Exact Euclidean distance has under 0.2 flop/byte for
